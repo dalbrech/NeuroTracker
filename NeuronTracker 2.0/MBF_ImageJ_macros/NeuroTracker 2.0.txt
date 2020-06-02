@@ -1,0 +1,1531 @@
+// SmallArena GCaMP Tracking 2
+// Version 1.0 Programmers: Dirk Albrecht, Johannes Larsch
+// Version 2.0.3 MQP Team Programmers: Justin Hess, Paul Cupido
+// NeuroTracker 2.0: Improved Software for Neural Imaging in Freely-Moving Animals MQP 2013-2014
+// Advisor: Prof. Dirk Albrecht
+// CS Co-advisor: Prof. Matt Ward
+//
+// December 2013 - Version 2.0.1:
+// Basic functionality achieved: automated tracking of a single worm
+//
+// March 2014 - Version 2.0.2:
+// Semi-Automated tracking of multiple worms at once functionality added
+// using distance formula and text file data storage features
+// 
+// April 2014 - Version 2.0.3:
+// Fully Automated tracking of multiple worms at once functionality added
+// with all code integrated into one file, automated thresholding implemented
+
+
+// control 'f' search for 'change path' and adjust path accordingly for different computers
+
+macro "NeuronTracking Action Tool - Cg902T3f18N" {
+ 
+ 
+// Track setting Defaults are read from txt file
+TrackSettingfile="F:\\Ca++ Imaging\\f. Code\\NeuronTracker 1.0\\TrckSett_awa_2p5x_4pxSq.txt"; // change path
+ 
+TrckSttng=newArray(25);
+TrckSttng=ReadSettings(TrckSttng,TrackSettingfile);
+ 
+animal = TrckSttng[0];
+lower=TrckSttng[1];         //threshold
+upper=65535; //threshold
+h = TrckSttng[2];               //height of search window for tracking
+w = TrckSttng[3];              //whidth of search window for tracking
+ 
+sqsize = TrckSttng[4];      //size of square for intensity measurement of neuron
+maxsize = TrckSttng[5];   //upper limit of particle size for tracking
+minsize = TrckSttng[6];    //lower limit of particle size for tracking
+expandAllow=TrckSttng[7]; //limit of allowed expansion of search window for tracking
+ 
+offsetx = -1*(2*w);
+offsety = -1*(2*h);
+ 
+ 
+// Default variables. not relevant for tracking function
+ 
+FrameForNeuronClick=2; // choose a frame when fluorescence is expected high to fascilitate neuron selection
+ThresholdDefaultMin=1290;
+ThresholdDefaultMax=65535;
+animalThreshold = newArray(25); // array of animal specific lower thresholds
+trackFolder=1; //1: track folder; 0: track open file
+ 
+ 
+//-------------------------------------------------
+ 
+// Check if images open.
+// if images open, track single movie.
+// else, ask for directory for batch tracking
+ 
+ 
+//dir="e:\\f\\20130205_n2_Ky121_1_N2_crossadapt\\";
+dir = getDirectory("choose a directory for stationary tracking");
+if (nImages==0){
+ 
+trackFolder=1;
+ 
+list = getFileList(dir);
+newlist = newArray(list.length);
+k=0;
+for (i=0; i < list.length; i++)  {
+if (endsWith(list[i], ".tif")) {newlist[k] = list[i];
+k++;
+}
+}
+ 
+list = Array.trim(newlist, k);
+ 
+startFile=getNumber("found "+list.length+" files, at what movie do you want to start tracking?", 1);
+startFile=startFile-1;
+endFile=getNumber("found "+list.length+" files, at what movie do you want to end tracking?", list.length);
+endFile=endFile-1;
+ 
+open(dir + list[startFile]);
+if (getVersion>="1.37r") setOption("DisablePopupMenu", true);
+ 
+}else{
+if (getVersion>="1.37r") setOption("DisablePopupMenu", true);
+trackFolder=0;
+// continue single movie tracking
+}
+ 
+ 
+ 
+// Get neuron coordinates. either from position file or via manual selection
+// if position files are found, ask if they should be used
+// there are 2 types of position files
+// 'PosFile' has positions in movie that was last tracked in current folder
+// 'moviePosFile' is created for each movie during tracking
+ 
+mainid = getImageID();
+title = getTitle();
+titleNoExt=substring(title,0,lengthOf(title)-4);
+ 
+dir = getDirectory("image");
+pathnoext = dir+substring(title,0,lengthOf(title)-4);
+ 
+setSlice(FrameForNeuronClick);
+run("Select None");
+setThreshold(ThresholdDefaultMin, ThresholdDefaultMax);
+updateDisplay();
+ 
+useSavedPos ="no";
+useSavedmoviePos ="no";
+ 
+moviePosFile = dir+titleNoExt+"_Pos.txt";
+PosFile=dir+"initialPos.txt";
+ 
+if (File.exists(moviePosFile)==1){
+ 
+  Dialog.create("Positions found for current movie");
+Dialog.addChoice("Use saved Positions", newArray("yes", "no"));
+Dialog.show();
+  useSavedmoviePos = Dialog.getChoice();
+               //useSavedPos = Dialog.getChoice();
+}
+ 
+ 
+ 
+ 
+//if (File.exists(PosFile)==1){
+//Dialog.create("Positions found for current folder");
+//Dialog.addChoice("Use saved Positions", newArray("yes", "no"));
+//Dialog.show();
+//useSavedPos = Dialog.getChoice();
+//}
+ 
+if (useSavedmoviePos=="yes"){
+readfile=moviePosFile;
+}
+//else if (useSavedPos=="yes") {
+//readfile=PosFile;
+//}
+else{
+readfile="none";
+}
+
+//Reset the log
+print("\\Clear");
+
+//-----------------------------------------------------------------------------
+//------------User input to select neuron(s) of worms----------------------------
+//-----------------------------------------------------------------------------
+
+
+//Create the araays to store the x and y coordinates from neurons
+//to be clicked on by the user 
+xmancoor=newArray(50);
+ymancoor=newArray(50);
+anyKeyDown=0;
+anyKeyDown=isKeyDown("space");
+
+//Set keyboard buttons equal to numbers as variables
+leftButton=16; 
+rightButton=4; 
+shift=1; 
+ctrl=2; 
+alt=8;
+
+//Initialize number of neuron clicks
+clicks = 0;
+
+//User Instructions**
+//Manual Threshold set by user
+//Click on Neuron(s)
+//Press space bar when done
+
+//While the user hasn't clicked on space bar and is still clicking on neurons
+while (isKeyDown("space") < 1) { 
+ 
+//Get cursor location and retrieve coordinates
+getCursorLoc(xman, yman, z, flags);
+ 
+//If the user clicks anywhere, then print the coordinates
+//and store the x and y coordinates into arrays
+//get the threshold value for each click that the user set 
+//by adjusting threshold before clicking
+if (flags&leftButton!=0) {
+print(xman+" "+yman+" "+z+" "+flags+" "+clicks);
+xmancoor[clicks]=xman;
+ymancoor[clicks]=yman;
+getThreshold(lower, upper);
+animalThreshold[clicks] = lower;
+makeSelection("point", xmancoor, ymancoor);
+clicks+= 1;
+wait(200);
+}
+wait(10);
+} 
+
+//Print results and how many neurons clicked on
+print("Exiting after "+clicks+" neurons recorded");
+
+//Adjust the array sizes by how many clicks occured
+xmancoor=Array.trim(xmancoor, clicks);
+ymancoor=Array.trim(ymancoor, clicks);
+print("Neuron Coordinates:");
+Array.print(xmancoor);
+Array.print(ymancoor);
+
+//-----------------------------------------------------------------------------
+//------------Make morphological skeletonized video----------------------------
+//-----------------------------------------------------------------------------
+
+//Creates a duplicate of video to perform skeletonization
+run("Duplicate...", "title=skeleton.tif duplicate");
+getDimensions(dummy,dummy,dummy,slices,nFrames);
+
+// Automatic Thresholding used for multiple worms
+
+//Performs automatic threshold and removes extra outlier points in video
+//then makes a skeletonized video after making video binary
+setBatchMode("hide");
+run("Subtract Background...", "rolling=100 stack");
+setAutoThreshold("Triangle dark");
+run("Convert to Mask", "method=Default background=Default black");
+run("Dilate", "stack");
+run("Remove Outliers...", "radius=4 threshold=50 which=Bright stack");
+run("Dilate", "stack");
+run("Remove Outliers...", "radius=4 threshold=50 which=Bright stack");
+run("Dilate", "stack");
+run("Remove Outliers...", "radius=6 threshold=50 which=Bright stack");
+run("Dilate", "stack");
+run("Remove Outliers...", "radius=6 threshold=50 which=Bright stack");
+run("Dilate", "stack");
+run("Remove Outliers...", "radius=6 threshold=50 which=Bright stack");
+run("Dilate", "stack");
+run("Remove Outliers...", "radius=6 threshold=50 which=Bright stack");
+run("Skeletonize", "stack");
+
+// Hard-coded Thresholding (old version)
+
+//setBatchMode("hide");
+//run("Subtract Background...", "rolling=100 stack");
+//setAutoThreshold("Default dark");
+//setAutoThreshold("MaxEntropy dark");
+//This line of code below is the main cause of hard-coding the threshold
+//setThreshold(190, 1335);
+//setOption("BlackBackground", true);
+//run("Convert to Mask", "method=MaxEntropy background=Dark black");
+//run("Dilate", "stack");
+//run("Remove Outliers...", "radius=4 threshold=50 which=Bright stack");
+//run("Dilate", "stack");
+//run("Remove Outliers...", "radius=4 threshold=50 which=Bright stack");
+//run("Dilate", "stack");
+//run("Remove Outliers...", "radius=6 threshold=50 which=Bright stack");
+//run("Skeletonize", "stack");
+
+
+setBatchMode("show");
+setBatchMode(false);
+
+//-----------------------------------------------------------------------------
+//------------Analyze Skeleton analysis and data collection of important points-------
+//-----------------------------------------------------------------------------
+
+
+//Parse to get images, get data of head and tail using AnalyzeSkeleton
+//and store them in a text file called coorstring
+skeleton = getImageID();
+getDimensions(dummy,dummy,dummy,slices,nFrames);
+xcoor1=newArray(602); 
+ycoor1=newArray(602); 
+xcoor2=newArray(602); 
+ycoor2=newArray(602); 
+coorstring=File.open("C:\\Program Files\\ImageJ\\macros\\coordinates.txt"); 
+
+//Loop goes through entire skeletonized video, makes a copy of every slice in video,
+//runs AnalyzeSkeleton plugin on each slice, extracts data for every slice from the
+//Results table produced from the plugin and stores skeleton data in arrays
+//then it prints output to the log.
+//NOTE: requires AnalyzeSkeleton plugin installed in plugins folder from web****
+for (i = 1; i <= slices; i++) {
+selectImage(skeleton);
+setSlice(i);
+
+setBatchMode(true);
+run("Copy"); 
+newImage("Slice", "8-bit White", 512, 512, 1); run("Paste"); 
+run("Analyze Skeleton (2D/3D)", "prune=none show");
+selectWindow("Branch information");
+saveAs("Results", "F:\\Ca++ Imaging\\f. Code\\NeuronTracker 2.0\\MBF_ImageJ_macros\\Branch information.txt"); // change path
+selectWindow("Branch information.txt");
+run("Close");
+close();
+setBatchMode(false);
+pathfile="F:\\Ca++ Imaging\\f. Code\\NeuronTracker 2.0\\MBF_ImageJ_macros\\Branch information.txt"; // change path
+filestring=File.openAsString(pathfile); 
+rows=split(filestring, "\n"); 
+x1coor=newArray(rows.length); 
+y1coor=newArray(rows.length); 
+x2coor=newArray(rows.length); 
+y2coor=newArray(rows.length);  
+for(j=0; j<rows.length; j++){ 
+columns=split(rows[j],"\t"); 
+ 
+//This part sifts through the branch results to only collect
+//head and tail points and ignores outliers
+//Make change to counter for multiple worms***
+if(parseInt(columns[2])>70){
+//print("Outlier ignored");
+//counter=0;
+//x1coor[counter]=columns[3]; - column 0
+//y1coor[counter]=columns[4]; - column 1
+//x2coor[counter]=columns[6]; - column 2
+//y2coor[counter]=columns[7]; - column 3
+//print(coor, x1coor[counter], "\n", y1coor[counter], "\n", x2coor[counter], "\n", y2coor[counter]);
+//counter=counter+1;
+print(coorstring, columns[3] + "\t" + columns[4] + "\t" + columns[6] + "\t" + columns[7] + "\t");
+//Use "clicks" variable later when using distance eqn to comapare every 2nd, 3rd, 4th etc. rows**
+}
+}
+ 
+//Now that the slice is over, write to text file the slice is done
+print(coorstring, "End of Slice" + "\t" + "End of Slice" + "\t" + "End of Slice " + "\t" + slices + "\t");
+}
+
+//Get the results window after analysis of skeleton(s)
+selectWindow("Results");
+
+run("Close");
+
+//We prepare the new text file, neuroncoorstring, to later store final neuron coordinate data
+File.close(coorstring);
+neuroncoorstring=File.open("F:\\Ca++ Imaging\\f. Code\\NeuronTracker 2.0\\MBF_ImageJ_macros\\neuroncoordinates.txt"); // change path
+neuroncoor="F:\\Ca++ Imaging\\f. Code\\NeuronTracker 2.0\\MBF_ImageJ_macros\\neuroncoordinates.txt";
+File.close(neuroncoorstring);
+
+neuroncoorx=newArray(slices+1);
+neuroncoory=newArray(slices+1);
+
+//Reset the log
+print("\\Clear");
+
+//start at next value to fill in index (counter) for neuroncoorx and neuroncoory
+counter=1;
+filled=0;
+firstslicedone=0;
+secondsliceindex=0;
+
+//Track one Neuron at a time*** - repeat for all worms
+// Encompass all tracking and analysis code after this inside this "for" loop
+// Clicks variable indicates how many worms to track
+for(j=1; j<=clicks; j++){ 
+//Open text file to retrieve and manipulate data from AnalyzeSkeleton procedure
+coor="F:\\Ca++ Imaging\\f. Code\\NeuronTracker 2.0\\MBF_ImageJ_macros\\coordinates.txt"; // change path
+coorstring=File.openAsString(coor); 
+rows2=split(coorstring, "\n");
+ 
+// Do Neuron 1 first, this process keeps repeating until the best neuron is stored in the array, repeat this for all neurons
+// Compare this neuron to all the other neurons (clicks) for first slice
+for(i=1; firstslicedone>0; i++){ 
+columns2=split(rows2[i],"\t");
+ 
+//If Coordinate 1 is accurate to the neuron clicked, we want that one in our final neuron array
+if(sqrt( (pow((parseInt(columns2[0])-xmancoor[j-1]),2)+pow((parseInt(columns2[1])-ymancoor[j-1]),2)) ) <10){
+neuroncoorx[0]=columns2[0]; 
+neuroncoory[0]=columns2[1];
+//print(neuroncoordinates, columns2[0] +  "\t" + columns2[1]);
+}
+ 
+//Otherwise check if Coordinate 2 is correct and we want that one
+else if(sqrt( (pow((parseInt(columns2[2])-xmancoor[j-1]),2)+pow((parseInt(columns2[3])-ymancoor[j-1]),2)) ) <10){
+neuroncoorx[0]=columns2[2]; 
+neuroncoory[0]=columns2[3];
+//print(neuroncoordinates, columns2[2] +  "\t" + columns2[3]);
+}
+//Otherwise we must be done analyzing the first slice
+else if( (columns2[0] == "End of Slice") ){
+ 
+//If done with first slice, stop analyzing data, go to next "for" loop
+firstslicedone=1;
+secondsliceindex=i+1;
+}
+}
+//}
+ 
+//Check if first steps failed, then just use first value from manual clicking for neuron array
+if(neuroncoorx[0]==0){
+neuroncoorx[0]=xmancoor[j-1];
+neuroncoory[0]=ymancoor[j-1];
+}     
+ 
+//Check if there is only a single worm to track, meaning clicks == 1
+if(clicks==1){
+ 
+//Now that we got the first neuron value, start after first slice (after number of clicks)
+for(i=secondsliceindex; i<rows2.length; i++){ 
+ 
+//start at next value to fill in index (counter) for neuroncoorx and neuroncoory
+columns2=split(rows2[i],"\t");
+ 
+//Repeat like was done with first few worms in first slice
+//If Coordinate 1 is accurate to the neuron clicked, we want that one in our final neuron array
+if(sqrt( (pow((parseInt(columns2[0])-neuroncoorx[counter-1]),2)+pow((parseInt(columns2[1])-neuroncoory[counter-1]),2)) ) < sqrt( (pow((parseInt(columns2[2])-neuroncoorx[counter-1]),2)+pow((parseInt(columns2[3])-neuroncoory[counter-1]),2)) )){
+neuroncoorx[counter]=columns2[0];
+neuroncoory[counter]=columns2[1];
+//print(neuroncoordinates, columns2[0] +  "\t" + columns2[1]);
+counter=counter+1;
+filled=1;
+}
+ 
+//Otherwise check if Coordinate 2 is correct and we want that one
+//else if( (columns2[0] != "End of Slice") ){
+else if(sqrt( (pow((parseInt(columns2[2])-neuroncoorx[counter-1]),2)+pow((parseInt(columns2[3])-neuroncoory[counter-1]),2)) ) < sqrt( (pow((parseInt(columns2[0])-neuroncoorx[counter-1]),2)+pow((parseInt(columns2[1])-neuroncoory[counter-1]),2)) )){
+neuroncoorx[counter]=columns2[2]; 
+neuroncoory[counter]=columns2[3];
+//print(neuroncoordinates, columns2[2] +  "\t" + columns2[3]);
+counter=counter+1;
+filled=1;
+}
+}
+}
+ 
+//Otherwise, there must be multiple worms to track if clicks > 1
+else{
+ 
+//Start at the index in text file of the second slice data from the video and analyze for all worms in the video
+for(i=secondsliceindex; i<rows2.length; i++){ 
+ 
+//start at next value to fill in index (counter) for neuroncoorx and neuroncoory
+columns2=split(rows2[i],"\t");
+ 
+//Repeat like was done with first few worms in first slice
+//If Coordinate 1 is accurate to the neuron clicked, we want that one in our final neuron array
+if(sqrt( (pow((parseInt(columns2[0])-neuroncoorx[counter-1]),2)+pow((parseInt(columns2[1])-neuroncoory[counter-1]),2)) ) <10){
+neuroncoorx[counter]=columns2[0];
+neuroncoory[counter]=columns2[1];
+ 
+//Set filled to 1 if we found a match for current worm
+filled=1;
+}
+ 
+//Otherwise check if Coordinate 2 is correct and we want that one
+else if(sqrt( (pow((parseInt(columns2[2])-neuroncoorx[counter-1]),2)+pow((parseInt(columns2[3])-neuroncoory[counter-1]),2)) ) <10){
+neuroncoorx[counter]=columns2[2]; 
+neuroncoory[counter]=columns2[3];
+ 
+//Set filled to 1 if we found a match for current worm
+filled=1;
+}
+ 
+//If that is not the right worm, and it is the end of the slice, and neuron coordinate array isn't filled yet, then error occured, and fill array anyway
+else if( (columns2[0]=="End of Slice") && (filled != 1) ){
+neuroncoorx[counter]=neuroncoorx[counter-1];
+neuroncoory[counter]=neuroncoory[counter-1];
+ 
+//Increment the counter now that the slice over, every slice represents an index in the neuron coordinate arrays**
+counter=counter+1;
+ 
+//Reset filled back to 0 now that slice is over, ready for next slice
+filled=0;
+}
+else if( (columns2[0]=="End of Slice") && (filled == 1) ){
+//print("Done with slice ");
+ 
+//Reset filled back to 0 now that slice is over, ready for next slice
+//Increment the counter now that the slice is done, every slice represents an index in the neuron coordinate arrays**
+counter=counter+1;
+ 
+//Reset filled back to 0 now that slice is over, ready for next slice
+filled=0;
+}
+}
+}
+ 
+//Now that we are done, print all results for the current worm to the log to collect data later
+print("Neuron Coordinate" + "\t" + parseInt(j));
+for(g=1; g<= slices; g++) {
+print(neuroncoorx[g-1] +  "\t" + neuroncoory[g-1]);
+}
+ 
+//Reset counter back to 1 for next neuron data to be collected
+counter=1;
+ 
+//Reset Neuron Coordinate arrays back to empty to be filled for next neuron data
+Array.fill(neuroncoorx, 0);
+Array.fill(neuroncoory, 0);
+}
+
+//Save all the Neuron Coordinate data from the Log to a new text file 
+selectWindow("Log");
+saveAs("Text", "F:\\Ca++ Imaging\\f. Code\\NeuronTracker 2.0\\MBF_ImageJ_macros\\neuroncoordinates.txt"); // change path
+
+//Reset the log
+print("\\Clear");
+
+
+getDimensions(dummy,dummy,dummy,slices,nFrames);
+
+//We prepare the new text file, neuroncoorstring2, to store final neuron coordinate data
+neuroncoor2="F:\\Ca++ Imaging\\f. Code\\NeuronTracker 2.0\\MBF_ImageJ_macros\\neuroncoordinates.txt"; // change path
+neuroncoorstring2=File.openAsString(neuroncoor2); 
+rows3=split(neuroncoorstring2, "\n");
+
+//Check how many neurons are in the result data
+neuronum=0;
+for(i=1; i<rows3.length; i++){ 
+columns3=split(rows3[i-1],"\t");
+if (columns3[0]=="Neuron Coordinate"){
+ 
+//Which neuron are we on now?
+neuronum=neuronum+1;
+}
+}
+
+// Go back to regular video of worm***
+selectImage(mainid);
+getDimensions(dummy,dummy,dummy,slices,nFrames);
+
+
+// read animal info from position file
+
+if (readfile!="none"){ 
+
+xpAll=ReadAnimalInfo(readfile,"x","y");
+ypAll=ReadAnimalInfo(readfile,"y","a");
+animalThreshold=ReadAnimalInfo(readfile,"t","f");
+redFlag=ReadAnimalInfo(readfile,"f","g");
+useTracking=ReadAnimalInfo(readfile,"g","end");
+
+//temporarily draw rectangles on neuron positions
+
+for (animal=0; (animal<xpAll.length); animal++) {
+xc=xpAll[animal]; 
+yc=ypAll[animal];
+makeRectangle(xc - sqsize/2, yc - sqsize/2, sqsize, sqsize);
+run("Add Selection...", "stroke=yellow width=1 fill=0");
+print("x",xc,"y",yc,"a",animal,"t",animalThreshold[animal],"f",redFlag[animal],"g",useTracking[animal]);
+}
+animal++;
+firstAnimal=0;
+}
+
+//get neuron positions manually if no posFiles found or not wanted
+else{
+// get all neuron positions by manual selection
+xpAll = newArray(100);
+ypAll = newArray(100);
+redFlag=newArray(100);
+useTracking=newArray(100);
+doneWithPicking=0;
+
+// how many animals have been tracked for this movie already?(an#.txt files)
+
+firstAnimal=-1;
+do {
+firstAnimal++;
+logname = pathnoext+".an"+firstAnimal+".txt";
+} while (File.exists(logname));
+
+//Original code design that required user intervention
+//for (animal=firstAnimal; !doneWithPicking; animal++) {
+//showStatus("Select center point of the neuron:"); 
+
+//do{
+//updateDisplay();
+//getCursorLoc(xc, yc, z, flags);
+
+//Here we now start tracking the first worm with first neuron coordinates
+xc=xmancoor[0];
+yc=ymancoor[0];
+
+//More lines of code from original design requiring user intervention
+//z=0;
+//flags=4;
+//doneWithPicking= (flags==4);
+//getThreshold(lower, upper);
+//animalThreshold[animal] = lower;
+//wait(50);
+//a=(flags != 16);
+//b=!doneWithPicking;
+//c=a && b;
+//} while (c);
+
+//This part of the code sets the threshold of each worm in the new video
+//for particle analysis that was manually inputted at the beginning of the script
+animalThreshold[animal] = lower;
+redFlag[animal]=0;
+useTracking[animal]=1;
+xpAll[animal] = xc; ypAll[animal] = yc;
+//if(b) print("x",xc,"y",yc,"a",animal,"t",lower,"f",0,"g",1);
+print("x",xc,"y",yc,"a",animal,"t",lower,"f",0,"g",1);
+slice = getSliceNumber();
+wait(1000);
+//}
+}
+
+selectWindow(title); 
+
+//If only one file to track in folder
+if (trackFolder==1){
+
+//AnimalsToTrack=animal-1;
+AnimalsToTrack=clicks;
+firstAnimal=0;
+close();
+
+
+//for (i=startFile; i<endFile; i+=5) { //start with early movies
+for (i=startFile; i<=endFile; i++) { //start with early movies
+  
+//Get file information
+open(dir + list[i]);
+title = getTitle(); 
+titleNoExt=substring(title,0,lengthOf(title)-4);   
+moviePosFile = dir+titleNoExt+"_Pos.txt";
+
+  script =
+    "lw = WindowManager.getFrame('"+title+"');\n"+
+    "if (lw!=null) {\n"+
+    "   lw.setLocation(20,20);\n"+
+    "}\n";
+  eval("script", script); 
+
+  script =
+    "lw = WindowManager.getFrame('Log');\n"+
+    "if (lw!=null) {\n"+
+    "   lw.setLocation(10,800);\n"+
+    "   lw.setSize(800, 200)\n"+
+    "}\n";
+  eval("script", script); 
+
+
+// save previous neuron endPositions
+// save to initialPos.txt and file specific moviePos.txt
+
+selectWindow("Log");
+print("\\Clear");
+for (animal=firstAnimal; animal<AnimalsToTrack; animal++) {
+print("x",xpAll[animal],"y",ypAll[animal],"a",animal,"t",animalThreshold[animal],"f",redFlag[animal],"g",useTracking[animal]);
+}
+
+
+selectWindow("Log");
+wait(150); //for some reason, needs long dealy here to work
+selectWindow("Log");
+wait(150);
+saveAs("Text",PosFile);
+selectWindow("Log");
+wait(150);
+selectWindow("Log");
+wait(150);
+saveAs("Text",moviePosFile);
+print("\\Clear");
+
+selectWindow(title); 
+
+updateDisplay();
+
+//For every animal to be tracked, set the threshold automatically
+for (animal=firstAnimal; animal<AnimalsToTrack; animal++) {
+setThreshold(animalThreshold[animal], upper);
+updateDisplay();
+xc = xpAll[animal]; 
+yc = ypAll[animal];
+
+// update TrckSttng variable with info for this animal before calling the tracker
+TrckSttng[1]= animal;
+TrckSttng[2]=animalThreshold[animal];
+TrckSttng[3]=h;
+TrckSttng[4]=w;
+TrckSttng[5]=offsetx;
+TrckSttng[6]=offsety;
+TrckSttng[7]=sqsize;
+TrckSttng[8]=maxsize;
+TrckSttng[9]=minsize;
+TrckSttng[10]=expandAllow;
+TrckSttng[11]=xc;
+TrckSttng[12]=yc;
+TrckSttng[14]=redFlag[animal];
+TrckSttng[15]=useTracking[animal];
+
+
+setSlice(1);
+TrckSttng=SmallArenaTrackerBatch(TrckSttng);
+lower=TrckSttng[2];
+xc=TrckSttng[11];
+yc=TrckSttng[12];
+redFlag[animal]=TrckSttng[14];
+useTracking[animal]=TrckSttng[15];
+animalThreshold[animal] = lower;
+xpAll[animal] = xc; ypAll[animal] = yc;
+print(xc,yc);
+}
+selectWindow(title); close();
+animal=0;
+
+}}
+
+//If no files to track in current folder
+if (trackFolder==0){
+animal=0;
+xc = xpAll[animal]; 
+yc = ypAll[animal];
+getThreshold(lower, upper);
+animalThreshold[animal] = lower;
+// update TrckSttng variable with info for this animal before calling the tracker
+TrckSttng[1]= animal;
+TrckSttng[2]=animalThreshold[animal];
+TrckSttng[3]=h;
+TrckSttng[4]=w;
+TrckSttng[5]=offsetx;
+TrckSttng[6]=offsety;
+TrckSttng[7]=sqsize;
+TrckSttng[8]=maxsize;
+TrckSttng[9]=minsize;
+TrckSttng[10]=expandAllow;
+TrckSttng[11]=xc;
+TrckSttng[12]=yc;
+TrckSttng[14]=0;
+//TrckSttng[15]=useTracking;
+TrckSttng[15]=1;
+setSlice(1);
+
+selectWindow("Log");
+print("start tracking");
+TrckSttng=SmallArenaTrackerBatch(TrckSttng);
+
+}
+
+
+} //end macro NeuronTracking [t]
+
+//-----------------------------------------------------------------------s
+
+//Read settings from current tracking file
+function ReadSettings(TrckSttng,file){
+//file="\\Applications\\ImageJ\\Test neural imaging data\\MBF_ImageJ Files\\TrckSett_awa_2p5x_4pxSq.txt"
+string = File.openAsString(file);
+xlines = split(string, "\n");
+n_xlines = lengthOf(xlines);
+
+for (n=0; n<n_xlines; n++)
+    {
+    TrckSttng[n] = substring(xlines[n],0,indexOf(xlines[n],"//")-1);
+    }
+
+return TrckSttng;
+}
+
+//-----------------------------------------------------------------------
+
+//Read worm coordinates from previous analysis
+function ReadAnimalInfo(PosFile,ID1,ID2){
+
+string = File.openAsString(PosFile);
+lines = split(string, "\n");
+n_lines = lengthOf(lines);
+AnimalInfo=newArray(n_lines);
+
+for (n=0; n<n_lines; n++)
+{
+if (ID2=="end"){
+AnimalInfo[n] = substring(lines[n],indexOf(lines[n],ID1)+2);
+}else{
+    AnimalInfo[n] = substring(lines[n],indexOf(lines[n],ID1)+2,indexOf(lines[n],ID2)-1);
+}
+
+}
+
+return AnimalInfo;
+}
+
+
+
+//-------------------------------------------------------
+
+
+function SmallArenaTrackerBatch(TrckSttng){
+// this version of the tracker can be called once the neuron positions are known
+
+animal=TrckSttng[1];
+lower=TrckSttng[2];
+h=TrckSttng[3];
+w=TrckSttng[4];
+offsetx=TrckSttng[5];
+offsety=TrckSttng[6];
+sqsize=TrckSttng[7];
+maxsize=TrckSttng[8];
+minsize=TrckSttng[9];
+expandallow=TrckSttng[10];
+xc=TrckSttng[11];
+yc=TrckSttng[12];
+redFlag=TrckSttng[14];
+useTracking=TrckSttng[15];
+
+print(xc,yc);
+
+// Go to beginning of stack
+
+
+mainid = getImageID();
+title = getTitle();
+dir = getDirectory("image");
+pathnoext = dir+substring(title,0,lengthOf(title)-4);
+
+
+// Initialize variables
+area = 0; maxint = 0; intdens = 0; x = xc; y = yc; intsub = 0; sqintdens =0; sqintsub =0; sqarea = 0; avg = 0; dx = 0; dy = 0;
+X = newArray(nSlices);
+Y = newArray(nSlices);
+Int1 = newArray(nSlices);
+Int2 = newArray(nSlices);
+BgMed = newArray(nSlices);
+Avg = newArray(nSlices);
+xp = xc; yp = yc;
+
+
+searchBoxScale=0.5;
+
+//print("\\Clear");
+//print("Slice,xc,yc,intdens,intsub,bgmedian,maxint,area,x,y,sqintdens,sqintsub,sqarea,threshold,animal,redFlag");
+
+selectWindow(title);
+setThreshold(lower, 65535);
+
+//index is start
+start=2;
+
+//Initialize data counter to later store data for each worm
+var datacount=0;
+
+//Make arrays to store sqintsub fluorescence intensity data for every worm
+var data1 = newArray(nSlices);
+var data2 = newArray(nSlices);
+var data3 = newArray(nSlices);
+var data4 = newArray(nSlices);
+var data5 = newArray(nSlices);
+var data6 = newArray(nSlices);
+var data7 = newArray(nSlices);
+var data8 = newArray(nSlices);
+var data9 = newArray(nSlices);
+var data10 = newArray(nSlices);
+var data11 = newArray(nSlices);
+var data12 = newArray(nSlices);
+var data13 = newArray(nSlices);
+var data14 = newArray(nSlices);
+var data15 = newArray(nSlices);
+var data16 = newArray(nSlices);
+var data17 = newArray(nSlices);
+var data18 = newArray(nSlices);
+var data19 = newArray(nSlices);
+var data20 = newArray(nSlices);
+
+var xc1 = newArray(nSlices);
+var yc1 = newArray(nSlices);
+var xc2 = newArray(nSlices);
+var yc2 = newArray(nSlices);
+var xc3 = newArray(nSlices);
+var yc3 = newArray(nSlices);
+
+//Start tracking for every worm here
+for(g=1; g<=neuronum; g++){
+
+//Clear the log, because we want to use it later for collecting data of the fluorescence intensity
+//which we are printing to the log during particle analysis
+//Reset this process for each worm**
+print("\\Clear");
+print("Slice,xc,yc,intdens,intsub,bgmedian,maxint,area,x,y,sqintdens,sqintsub,sqarea,threshold,animal,redFlag");
+
+ 
+//Check if multiple worms need to be tracked
+if(neuronum>1){
+//This line of code below takes start index to retrieved proper coordinates
+columns3=split(rows3[start],"\t");
+}
+
+//Very important**************************
+//This starts the particle analysis procedure for every frame/slice in video****
+for (slice=2; slice<=nSlices; slice++)  {
+
+//Check if there is one worm to be tracked
+if(neuronum==1){
+//This line of code below takes start index to retrieved proper coordinates
+columns3=split(rows3[start],"\t");
+}
+//Set the slice in the video
+setSlice(slice);
+
+//Alternative design of where to apply for every worm loop
+//for(g=1; g<=neuronum; g++){
+//columns3=split(rows3[start],"\t");
+
+// Allow manual pausing via spacebar
+
+//if(slice%10==0){
+//print("hello");
+selectWindow(title); //this command slows down tracking A LOT! necessary to detect keyDown reliably!
+//}
+
+//Check if space, shift or alt keys are pressed by user during tracking
+anyKeyDown=0;
+anyKeyDown=isKeyDown("space") || isKeyDown("shift") || isKeyDown("alt"); //avoiding if statements in loop
+if(anyKeyDown){
+
+//Check if the space key is down during tracking
+if (isKeyDown("space")) {
+showStatus("Select center point of the neuron:"); 
+do {
+getCursorLoc(xc, yc, z, flags);
+wait(50);
+// If tracker hasn't lost sight of neuron
+} while (flags != 16);
+xp = xc; yp = yc;
+slice = getSliceNumber();
+// Remove upper threshold limit
+getThreshold(lower, upper);
+wait(100);
+setThreshold(lower, 65535);
+}
+
+// Allow stationary tracking via 'shift' toggle
+if (isKeyDown("shift")) {
+if (useTracking == 0) {
+wait(400);
+useTracking=1;
+}
+else if (useTracking == 1) {
+wait(400);
+useTracking=0;
+}
+
+}
+
+//Allow flagging via 'alt'
+if (isKeyDown("alt")) {
+if (redFlag == 0) {
+wait(400);
+redFlag=1;
+}
+else if (redFlag == 1) {
+wait(400);
+redFlag=0;
+}
+
+}
+
+//wait(500);
+//start=start+nSlices;
+
+//Alternative End the  "For" loop for multiple worms (for every slice)*******
+//}
+//start=slice+1;
+
+} //Ends anykeydown loop
+
+
+//index is start
+//start=1;
+selectImage(mainid);
+run("Select None");
+
+//for(g=1; g<=neuronum; g++){
+//columns3=split(rows3[start],"\t");
+
+
+//useTracking=1;
+//This entire "if" loop below is within the "for" every slice loop
+//It checks if tracking is still needed to be performed
+if (useTracking == 1) {
+
+//Original code: makeOval(xc - searchBoxScale*w, yc - searchBoxScale*h, w, h);
+
+
+//Modified Code:
+//Justin Hess, March 2014
+//During tracking, plug in Neuron Coordinates to function to make Oval 
+//over neuron positions for proper automatic neuron tracking
+//Also start the for every worm loop to simultaneously track each worm in each slice/frame************
+//for(g=1; g<=neuronum; g++){
+//Get data of skeleton coordinates from text file obtained from previous analysis of skeleton video
+//columns3=split(rows3[start],"\t");
+ 
+// Start tracking with best coordinates of neuron estimation
+
+//For the first slice to be tracked (slice 2)
+if(slice==2){
+//Make an oval around the coordinates the user clicked on at beginning of the script
+makeOval(xmancoor[g-1] - searchBoxScale*w, ymancoor[g-1] - searchBoxScale*h, w, h);
+}
+else{
+//Check if only one worm to track
+if(neuronum==1){
+// Using the skeleton head coordinates, make a preliminary oval around them
+makeOval(columns3[0] - searchBoxScale*w, columns3[1] - searchBoxScale*h, w, h);
+}
+//If multiple worms
+else{
+//Use verified x and y coordinates
+makeOval(xc - searchBoxScale*w, yc - searchBoxScale*h, w, h);
+}
+}
+ 
+
+// With the oval, calculate measurements and analyze particles to get pixels with high threshold for analysis
+run("Set Measurements...", "area min centroid center integrated slice limit redirect=None decimal=3");
+run("Analyze Particles...", "size="+minsize+"-"+maxsize+" circularity=0.00-1.00 show=Nothing display clear slice");
+
+// Check if number of results is 1, then get data from current particles above threshold
+if (nResults == 1) {
+xc = getResult("XM", 0);
+yc = getResult("YM", 0);
+area = getResult("Area", 0);
+maxint = getResult("Max", 0);
+intdens = getResult("IntDen", 0);
+x = getResult("X", 0);
+y = getResult("Y", 0);
+avg = intdens / area;
+} 
+// Otherwise expand the resolution area
+else if (nResults > 1) {
+biggestArea = 0;
+for (res=0; res<nResults; res++) {
+resArea = getResult("Area", res);
+if (resArea > biggestArea) {
+biggestArea = resArea;
+biggestAreaPos = res;
+}
+}
+ 
+//After expanding resolution area, get the pixel data from tracker
+xc = getResult("XM", biggestAreaPos );
+yc = getResult("YM", biggestAreaPos );
+area = getResult("Area", biggestAreaPos );
+maxint = getResult("Max", biggestAreaPos );
+intdens = getResult("IntDen", biggestAreaPos );
+x = getResult("X", biggestAreaPos );
+y = getResult("Y", biggestAreaPos );
+avg = intdens / area;
+} 
+// If all fails, then expand the search region to find the neruon pixels with a high threshold value
+else {
+expand = 0;
+do {
+//Expand the search region to find appropriate pixel
+expand++;
+makeOval(xc - searchBoxScale*w - expand, yc - searchBoxScale*h - expand, w+5*expand, h+2*expand);
+//run("Analyze Particles...", "size="+minsize+"-"+maxsize+" circularity=0.00-1.00 show=Nothing display exclude clear slice");
+run("Analyze Particles...", "size="+minsize+"-"+maxsize+" circularity=0.00-1.00 show=Nothing display clear slice");
+} while ((nResults < 1) && (expand <= expandAllow));
+ 
+//If there is still a worm to be tracked then get the coordinate data
+if (nResults == 1) {
+xc = getResult("XM", 0);
+yc = getResult("YM", 0);
+area = getResult("Area", 0);
+maxint = getResult("Max", 0);
+intdens = getResult("IntDen", 0);
+x = getResult("X", 0);
+y = getResult("Y", 0);
+avg = intdens / area;
+} 
+
+// This is where the video would stop and require user to click on neuron again, 
+// instead insert skeleton coordinates if tracking fails to find the neuron again*******
+else {
+makeRectangle(xc - sqsize/2, yc - sqsize/2, sqsize, sqsize);
+showStatus("Select center point of the neuron:"); 
+do {
+//Here is where script gives up tracking
+//When fails, verify with our neuron coordinates
+//getCursorLoc(xc, yc, z, flags);
+//wait(50);
+xc=columns3[0];
+yc=columns3[1];
+flags=16;
+} while (flags != 16);
+//Otherwise use the current best estimated coordinates of the neuron, xc and yc
+xp = xc; yp = yc;
+slice = getSliceNumber();
+
+// Remove upper threshold limit
+getThreshold(lower, upper);
+wait(100);
+setThreshold(lower, 65535);
+
+} //ends else loop
+} //ends outer else loop
+//Major bug fixed: a bracket can end for every worm loop here, this makes the code fail for tracking multiple worms*****
+
+// Set small region around neuron center
+makeRectangle(xc - sqsize/2, yc - sqsize/2, sqsize, sqsize);
+run("Clear Results");
+setThreshold(lower, 65535);
+run("Set Measurements...", "area min centroid center integrated slice redirect=None decimal=3");
+run("Measure");
+if (nResults == 1) {
+sqarea = getResult("Area", 0);
+sqintdens = getResult("IntDen", 0);
+}
+run("Add Selection...", "stroke=yellow width=1 fill=0");
+Overlay.setPosition(slice);
+
+//Get background from oval tracker
+//makeOval(xc - 0.5*w + offsetx, yc - 0.5*h + offsety, w, h);
+makeOval(xc - 1.2*w, yc - 1.2*h, 2.4*w, 2.4*h);
+setKeyDown("alt");
+makeOval(xc - 0.7*w, yc - 0.7*h, 1.4*w, 1.4*h);
+
+//Clear the results once particles are analyzed
+run("Clear Results");
+run("Set Measurements...", "area mean min median slice redirect=None decimal=3");
+run("Measure");
+//Record the results
+if (nResults == 1) {
+bgavg = getResult("Mean", 0);
+bgmedian = getResult("Median", 0);
+intsub = intdens - (area * bgmedian);
+//This line below is very important**
+//sqintsub is the squared intensity value of the fluoresence intensity, it is what is graphed for final analysis
+sqintsub = sqintdens - (sqarea * bgmedian);
+}
+
+// Check if multiple worms, if so indent start index in text file to retrieve proper data for each worm's location
+//if(neuronum>1){
+//start=start+nSlices;
+//}
+ 
+// This code stores all the data of each worm currently being tracked each slice to graph later
+if(g==1){
+data1[slice-1]=sqintsub;
+}
+else if(g==2){
+data2[slice-1]=sqintsub;
+}
+else if(g==3){
+data3[slice-1]=sqintsub;
+}
+else if(g==4){
+data4[slice-1]=sqintsub;
+}
+else if(g==5){
+data5[slice-1]=sqintsub;
+}
+else if(g==6){
+data6[slice-1]=sqintsub;
+}
+else if(g==7){
+data7[slice-1]=sqintsub;
+}
+else if(g==8){
+data8[slice-1]=sqintsub;
+}
+else if(g==9){
+data9[slice-1]=sqintsub;
+}
+else if(g==10){
+data10[slice-1]=sqintsub;
+}
+else if(g==11){
+data11[slice-1]=sqintsub;
+}
+else if(g==12){
+data12[slice-1]=sqintsub;
+}
+else if(g==13){
+data13[slice-1]=sqintsub;
+}
+else if(g==14){
+data14[slice-1]=sqintsub;
+}
+else if(g==15){
+data15[slice-1]=sqintsub;
+}
+else if(g==16){
+data16[slice-1]=sqintsub;
+}
+else if(g==17){
+data17[slice-1]=sqintsub;
+}
+else if(g==18){
+data18[slice-1]=sqintsub;
+}
+else if(g==19){
+data19[slice-1]=sqintsub;
+}
+else if(g==20){
+data20[slice-1]=sqintsub;
+}
+
+ 
+ 
+// print the results of each worm for Matlab analysis later
+print(slice+","+xc+","+yc+","+intdens+","+intsub+","+bgmedian+","+maxint+","+area+","+x+","+y+","+sqintdens+","+sqintsub+","+sqarea+","+lower+","+animal+","+redFlag+","+useTracking);
+
+//Save the results in arrays for collecting of the data after analysis is over
+X[slice-1]=xc;
+Y[slice-1]=yc;
+Int1[slice-1]=intsub;
+Int2[slice-1]=sqintsub;
+BgMed[slice-1]=bgmedian;
+Avg[slice-1]=avg;
+
+//Velocity prediction
+xp = xc; yp = yc;
+ 
+// Indent start index by one for each slice
+start=start+1;
+
+} // Finally ends the for every slice loop**
+
+//Check if there are multiple worms
+if(neuronum>1){
+//If so, set slice and data index back to beginning of video to start tracking the next worm
+setSlice(1);
+start=1+nSlices;
+}
+
+
+
+} // Ends for every worm loop here**
+
+//Now we want to output all the data in a text file for each worm tracked
+selectWindow("Log");
+logname = pathnoext+".an"+animal+".txt";
+
+action = "";
+//if (!File.exists(logname)){
+wait(50);
+selectWindow("Log");
+wait(150);
+selectWindow("Log");
+wait(150);
+saveAs("Text",logname);
+//}else {
+//Dialog.create("Log file already exists");
+//Dialog.addChoice("Choose:", newArray("Overwrite", "New Animal"));
+//Dialog.show();
+//action = Dialog.getChoice();
+//if (action!="Overwrite") {
+//do{
+//animal++;
+
+//This line below saves the text file according to the current worm being analyzed, an"g" represents the current worm being tracked
+logname = pathnoext+".an"+g+".txt";
+//} while (File.exists(logname));
+//}
+selectWindow("Log");
+
+wait(150);
+selectWindow("Log");
+wait(150);
+//Save as a text file to the output data
+saveAs("Text",logname);
+//}
+//Clear the log results for tracking of next worm
+print("\\Clear");
+print(action);
+print("Saved to logfile: "+logname);
+
+} //Finally ends the if useTracking loop*
+
+
+
+
+//Finally, the code below performs the output of all graphs of all worm(s) tracked
+
+//********************************************************************************
+//1
+arraysumcheck= 0;
+for(arrayindex=0;arrayindex<lengthOf(data1);arrayindex++){
+arraysumcheck+= data1[arrayindex];
+}
+if(arraysumcheck>0){
+Plot.create("Integrated intensity- Worm 1", "Frame", "Sq. Intensity", data1);
+Plot.show();
+}
+//********************************************************************************
+//2
+arraysumcheck= 0;
+for(arrayindex=0;arrayindex<lengthOf(data2);arrayindex++){
+arraysumcheck+= data2[arrayindex];
+}
+if(arraysumcheck>0){
+Plot.create("Integrated intensity- Worm 2", "Frame", "Sq. Intensity", data2);
+Plot.show();
+}
+//********************************************************************************
+//3
+arraysumcheck= 0;
+for(arrayindex=0;arrayindex<lengthOf(data3);arrayindex++){
+arraysumcheck+= data3[arrayindex];
+}
+if(arraysumcheck>0){
+Plot.create("Integrated intensity- Worm 3", "Frame", "Sq. Intensity", data3);
+Plot.show();
+}
+//********************************************************************************
+//4
+arraysumcheck= 0;
+for(arrayindex=0;arrayindex<lengthOf(data4);arrayindex++){
+arraysumcheck+= data4[arrayindex];
+}
+if(arraysumcheck>0){
+Plot.create("Integrated intensity- Worm 4", "Frame", "Sq. Intensity", data4);
+Plot.show();
+}
+//********************************************************************************
+//5
+arraysumcheck= 0;
+for(arrayindex=0;arrayindex<lengthOf(data5);arrayindex++){
+arraysumcheck+= data5[arrayindex];
+}
+if(arraysumcheck>0){
+Plot.create("Integrated intensity- Worm 5", "Frame", "Sq. Intensity", data5);
+Plot.show();
+}
+//********************************************************************************
+//6
+arraysumcheck= 0;
+for(arrayindex=0;arrayindex<lengthOf(data6);arrayindex++){
+arraysumcheck+= data6[arrayindex];
+}
+if(arraysumcheck>0){
+Plot.create("Integrated intensity- Worm 6", "Frame", "Sq. Intensity", data6);
+Plot.show();
+}
+//********************************************************************************
+//7
+arraysumcheck= 0;
+for(arrayindex=0;arrayindex<lengthOf(data7);arrayindex++){
+arraysumcheck+= data7[arrayindex];
+}
+if(arraysumcheck>0){
+Plot.create("Integrated intensity- Worm 7", "Frame", "Sq. Intensity", data7);
+Plot.show();
+}
+//********************************************************************************
+//8
+arraysumcheck= 0;
+for(arrayindex=0;arrayindex<lengthOf(data8);arrayindex++){
+arraysumcheck+= data8[arrayindex];
+}
+if(arraysumcheck>0){
+Plot.create("Integrated intensity- Worm 8", "Frame", "Sq. Intensity", data8);
+Plot.show();
+}
+//********************************************************************************
+//9
+for(arrayindex=0;arrayindex<lengthOf(data9);arrayindex++){
+arraysumcheck+= data9[arrayindex];
+}
+if(arraysumcheck>0){
+Plot.create("Integrated intensity- Worm 9", "Frame", "Sq. Intensity", data9);
+Plot.show();
+}
+//********************************************************************************
+//10
+for(arrayindex=0;arrayindex<lengthOf(data10);arrayindex++){
+arraysumcheck+= data10[arrayindex];
+}
+if(arraysumcheck>0){
+Plot.create("Integrated intensity- Worm 10", "Frame", "Sq. Intensity", data10);
+Plot.show();
+}
+//********************************************************************************
+//11
+for(arrayindex=0;arrayindex<lengthOf(data11);arrayindex++){
+arraysumcheck+= data11[arrayindex];
+}
+if(arraysumcheck>0){
+Plot.create("Integrated intensity- Worm 11", "Frame", "Sq. Intensity", data11);
+Plot.show();
+}
+//********************************************************************************
+//12
+for(arrayindex=0;arrayindex<lengthOf(data12);arrayindex++){
+arraysumcheck+= data12[arrayindex];
+}
+if(arraysumcheck>0){
+Plot.create("Integrated intensity- Worm 12", "Frame", "Sq. Intensity", data12);
+Plot.show();
+}
+//********************************************************************************
+//13
+for(arrayindex=0;arrayindex<lengthOf(data13);arrayindex++){
+arraysumcheck+= data13[arrayindex];
+}
+if(arraysumcheck>0){
+Plot.create("Integrated intensity- Worm 13", "Frame", "Sq. Intensity", data13);
+Plot.show();
+}
+//********************************************************************************
+//14
+for(arrayindex=0;arrayindex<lengthOf(data14);arrayindex++){
+arraysumcheck+= data14[arrayindex];
+}
+if(arraysumcheck>0){
+Plot.create("Integrated intensity- Worm 14", "Frame", "Sq. Intensity", data14);
+Plot.show();
+}
+//********************************************************************************
+//15
+for(arrayindex=0;arrayindex<lengthOf(data15);arrayindex++){
+arraysumcheck+= data15[arrayindex];
+}
+if(arraysumcheck>0){
+Plot.create("Integrated intensity- Worm 15", "Frame", "Sq. Intensity", data15);
+Plot.show();
+}
+//********************************************************************************
+//16
+for(arrayindex=0;arrayindex<lengthOf(data16);arrayindex++){
+arraysumcheck+= data16[arrayindex];
+}
+if(arraysumcheck>0){
+Plot.create("Integrated intensity- Worm 16", "Frame", "Sq. Intensity", data16);
+Plot.show();
+}
+//********************************************************************************
+//17
+for(arrayindex=0;arrayindex<lengthOf(data17);arrayindex++){
+arraysumcheck+= data17[arrayindex];
+}
+if(arraysumcheck>0){
+Plot.create("Integrated intensity- Worm 17", "Frame", "Sq. Intensity", data17);
+Plot.show();
+}
+//********************************************************************************
+//18
+for(arrayindex=0;arrayindex<lengthOf(data18);arrayindex++){
+arraysumcheck+= data18[arrayindex];
+}
+if(arraysumcheck>0){
+Plot.create("Integrated intensity- Worm 18", "Frame", "Sq. Intensity", data18);
+Plot.show();
+}
+//********************************************************************************
+//19
+for(arrayindex=0;arrayindex<lengthOf(data19);arrayindex++){
+arraysumcheck+= data19[arrayindex];
+}
+if(arraysumcheck>0){
+Plot.create("Integrated intensity- Worm 19", "Frame", "Sq. Intensity", data19);
+Plot.show();
+}
+//********************************************************************************
+//20
+for(arrayindex=0;arrayindex<lengthOf(data20);arrayindex++){
+arraysumcheck+= data20[arrayindex];
+}
+if(arraysumcheck>0){
+Plot.create("Integrated intensity- Worm 20", "Frame", "Sq. Intensity", data20);
+Plot.show();
+}
+Array.print(data1);
+Array.print(data2);
+
+
+
+        //Plot.create("Position", "Frame", "Pixels", X);
+        //Plot.setLimits(0, nSlices, 0, 512);
+        //Plot.setColor("red");
+        //Plot.add("line", Y);
+        //Plot.setColor("blue");
+
+
+
+
+//The code below creates the text files of all the data from the results,
+//this data is used to perform MATLAB analysis of the behavioral
+//analysis of the worms and map it correlating to neural activity.
+
+//When analyzing multiple worms, the data should all be in the 
+//first text file created with the text "an0" in the file name.
+
+   //     Plot.show();
+wait(10000);
+//setLocation(5, 400);
+
+//selectWindow("Log");
+//logname = pathnoext+".an"+animal+".txt";
+
+//action = "";
+//if (!File.exists(logname)){
+//wait(50);
+//selectWindow("Log");
+//wait(150);
+//selectWindow("Log");
+//wait(150);
+//saveAs("Text",logname);
+//}else {
+//Dialog.create("Log file already exists");
+//Dialog.addChoice("Choose:", newArray("Overwrite", "New Animal"));
+//Dialog.show();
+//action = Dialog.getChoice();
+//if (action!="Overwrite") {
+//do {
+//animal++;
+//logname = pathnoext+".an"+animal+".txt";
+//} while (File.exists(logname));
+//}
+//selectWindow("Log");
+
+//wait(150);
+//selectWindow("Log");
+//wait(150);
+//saveAs("Text",logname);
+//}
+//print(action);
+//print("Saved to logfile: "+logname);
+//selectWindow("Integrated intensity");
+//wait(100);
+//close();
+
+selectWindow(title);
+
+
+
+TrckSttng[2]=lower;
+TrckSttng[11]=xc;
+TrckSttng[12]=yc;
+
+TrckSttng[14]=redFlag;
+TrckSttng[15]=useTracking;
+
+return TrckSttng;
+
+
+} // end function SmallArenaTracker

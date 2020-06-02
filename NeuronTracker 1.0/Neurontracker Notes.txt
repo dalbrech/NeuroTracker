@@ -1,0 +1,18 @@
+Have .tif files from recorded experiments in one folder
+Open ImageJ > Plugins > Macros > NeuronTracking [t]
+Select folder with videos to analyze
+Identify recording set that is ideal for analysis
+Find video start (closest to top of folder), 15
+Find video end (closest to bottom of folder), 24
+Select neuron(s) on second frame of video file that opens
+Keep track of which animal is which chosen (i.e. do WT then exper.)
+Play with brightness/contrast in imageJ and threshold to identify neurons
+Select neruons with cross hairs
+Right click to start progam
+Allow program to run each frame for each neuron image
+If tracking dot goes off desired neuron, pause (SPACE), rewind, realign
+May need to adjust threshold to be more clear for that neuron
+Repeat for each worm, allow to finish.
+
+When complete or paused, find text files in desired folder and open MATLAB
+Locate these files and see MATLAB notes

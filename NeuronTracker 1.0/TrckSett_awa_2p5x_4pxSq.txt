@@ -1,0 +1,8 @@
+0 //animal: irrelevant.  THE ORDER OF THESE PARAMETERS MUST BE MAINTAINED. ADD EXTRA PARAMETERS AT THE END
+1200 //lower: threshold default
+8 //h: height of search window for tracking
+8 //w: whidth of search window for tracking
+4 //sqsize: size of square for intensity measurement of neuron
+40 //maxsize: upper limit of particle size for tracking
+2 //minsize: lower limit of particle size for tracking
+10 //expandallow: limit of allowed expansion of search window for tracking
