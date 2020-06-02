@@ -18,7 +18,7 @@ macro "NeuronTracking v1.11 [t] - Cg902T3f18N" {
   //   Place tracking settings files in the ImageJ/Fiji app folder
   //
   currentdir = getDirectory("current");                                     // get current directory
-  call("ij.io.OpenDialog.setDefaultDirectory", getDirectory("imagej");      // change default to imagej dir
+  call("ij.io.OpenDialog.setDefaultDirectory", getDirectory("imagej"));      // change default to imagej dir
   TrackSettingfile = File.openDialog("Select a File");                      // choose track settings file    
   call("ij.io.OpenDialog.setDefaultDirectory", currentdir);                 // return to prior directory
   //TrackSettingfile="C:\\Fiji.app\\TrckSett_AWC_5x_4pxSq_AdaptMoving.txt";
@@ -58,13 +58,13 @@ macro "NeuronTracking v1.11 [t] - Cg902T3f18N" {
 //   if images are open, track the single open movie.
 //   otherwise, ask for a directory for batch tracking
   
-  if (getVersion>="1.37r") setOption("DisablePopupMenu", true);
+  //if (getVersion>="1.37r") setOption("DisablePopupMenu", true);
   
   if (nImages == 0) {                       // if there are no open images...
   
     trackFolder = 1;                        // set to track a folder
     //dir="e:\\f\\20130205_n2_Ky121_1_N2_crossadapt\\";
-    dir = getDirectory("choose a directory for stationary tracking");     
+    dir = getDirectory("choose a directory for tracking");     
                                             // get folder name containing .tif video files 
     list = getFileList(dir);                // get all files in directory...
     Array.sort(list);                       // ...and sort them
