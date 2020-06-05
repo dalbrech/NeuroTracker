@@ -1,0 +1,10 @@
+0 //animal: irrelevant.  THE ORDER OF THESE PARAMETERS MUST BE MAINTAINED. ADD EXTRA PARAMETERS AT THE END
+1200 //lower: threshold default
+8 //searchDia: diameter of search window for tracking
+16 //bgRingDia: inner diameter of background window for tracking
+16 //sqsize: size of square for intensity measurement of neuron
+80 //maxsize: upper limit of particle size for tracking
+2 //minsize: lower limit of particle size for tracking
+0 //expandallow: limit of allowed expansion of search window for tracking
+0 //useTracking: update the integration box location (0 = fixed position)
+0 //velocityPredict: update search region location assuming same velocity as prior frame 
