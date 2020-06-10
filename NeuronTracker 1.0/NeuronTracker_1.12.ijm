@@ -9,9 +9,11 @@
 // v.1.11 DRA - add comments
 // v.1.12 DRA - streamline input variables
 //                new TrackSettings array: 
+// v.1.12.1 DRA bugfixes: graphing at end, handling loading of prior positions
+//              there may still be some issues with variables saved as text vs integer format?
 
 
-macro "NeuronTracking v1.11 [t] Action Tool - Cg902T3f18N" {
+macro "NeuronTracking v1.12 [n] Action Tool - Cf02T3f18NT1f18N" {
 
 // Obtain Tracking Settings
 
@@ -31,7 +33,7 @@ macro "NeuronTracking v1.11 [t] Action Tool - Cg902T3f18N" {
   MAX_ANIMALS = 25;                                               // maximum animals, for preallocaing arrays               
   BG_RING_OUT = 1.5;                                              // outer vs inner diameter for background ring
   
-  TrackSetting=newArray(MAX_ANIMALS);                             // initialize settings array 
+  TrackSetting=newArray(13);                            		  // initialize settings array 
   TrackSetting=ReadSettings(TrackSetting,TrackSettingfile);       // read settings from file
 
   // Define variables from Track Settings
@@ -84,11 +86,11 @@ macro "NeuronTracking v1.11 [t] Action Tool - Cg902T3f18N" {
     // Allow selection of the starting and ending video number
     //
     if (list.length > 1) {
-    	startFile = getNumber("found "+list.length+" files, at what movie do you want to start tracking?", 1); startFile = startFile-1;
-    	endFile = getNumber("found "+list.length+" files, at what movie do you want to end tracking?", list.length); endFile = endFile-1;
+        startFile = getNumber("found "+list.length+" files, at what movie do you want to start tracking?", 1); startFile = startFile-1;
+        endFile = getNumber("found "+list.length+" files, at what movie do you want to end tracking?", list.length); endFile = endFile-1;
     } else {
-    	startFile = 0;
-    	endFile = 0;
+        startFile = 0;
+        endFile = 0;
     }
     open(dir + list[startFile]);            // open the first video 
   
@@ -98,7 +100,7 @@ macro "NeuronTracking v1.11 [t] Action Tool - Cg902T3f18N" {
    
   }
 
-	if (getVersion>="1.37r") setOption("DisablePopupMenu", true);  // this allows right-mouse-button to work
+    if (getVersion>="1.37r") setOption("DisablePopupMenu", true);  // this allows right-mouse-button to work
 
 
 //-------------------------------------------------
@@ -132,28 +134,32 @@ macro "NeuronTracking v1.11 [t] Action Tool - Cg902T3f18N" {
     readfile = "none";
   }
   
+  useSavedPos = "";
+  firstAnimal=0;
+  
   // if existing neuron positions are chosen, read animal info from position file
   if (readfile!="none") { 
     xpAll = ReadAnimalInfo(readfile,"x","y");
     ypAll = ReadAnimalInfo(readfile,"y","a");
     animalThreshold = ReadAnimalInfo(readfile,"t","f");
     animalRedFlag = ReadAnimalInfo(readfile,"f","g");
-    animalTracking = ReadAnimalInfo(readfile,"g","end");
+    //animalTracking = ReadAnimalInfo(readfile,"g","end");
+    animalTracking = newArray(xpAll.length); 
+    for (i=0; i<animalTracking.length; i++) animalTracking[i] = useTracking;
 
     // temporarily draw rectangles on neuron positions
-    for (animal=0; (animal < xpAll.length); animal++) {
+    for (animal=0; (xpAll[animal] > 0); animal++) {
       xc = xpAll[animal]; 
       yc = ypAll[animal];
       makeRectangle(xc - sqsize/2, yc - sqsize/2, sqsize, sqsize);
       run("Add Selection...", "stroke=yellow width=1 fill=0");
       print("x",xc,"y",yc,"a",animal,"t",animalThreshold[animal],"f",animalRedFlag[animal],"g",animalTracking[animal]);
     }
+    print("after initial loading of found position files");
   
-    animal++;
-    firstAnimal=0;
+    animal++;
 
     // Ask if these existing positions should be used
-    useSavedPos = "";
     if (readfile == moviePosFile) {
       Dialog.create("Positions found for current movie");
     } else {
@@ -173,23 +179,23 @@ macro "NeuronTracking v1.11 [t] Action Tool - Cg902T3f18N" {
 
     // how many animals have been tracked for this movie already? (check filenames for "an#.txt" files)
     if (useSavedPos == "yes and add more") {
-    	firstAnimal=-1;
+      firstAnimal=-1;
       do {
         firstAnimal++;
         logname = pathnoext+".an"+firstAnimal+".txt";
       } while (File.exists(logname));                       // "firstAnimal" now is the number of the first animal to track
     } else if (useSavedPos == "") {  
-    	xpAll = newArray(MAX_ANIMALS);                        // initialize for each animal x, y, etc.
-    	ypAll = newArray(MAX_ANIMALS);
-    	animalThreshold = newArray(MAX_ANIMALS);
-    	animalRedFlag = newArray(MAX_ANIMALS);
-    	animalTracking = newArray(MAX_ANIMALS);
+        xpAll = newArray(MAX_ANIMALS);                        // initialize for each animal x, y, etc.
+        ypAll = newArray(MAX_ANIMALS);
+        animalThreshold = newArray(MAX_ANIMALS);
+        animalRedFlag = newArray(MAX_ANIMALS);
+        animalTracking = newArray(MAX_ANIMALS);
     }
     
     doneWithPicking = 0;
 
     for (animal=firstAnimal; !doneWithPicking; animal++) {  // loop through manual clicking on each neuron, and logging x,y,threshold to file
-      print(animalThreshold[animal]);
+      print("animal",animal,"threshold",animalThreshold[animal],"done picking",doneWithPicking,"array size",xpAll.length);
       if (animalThreshold[animal] == 0) animalThreshold[animal] = lower;
       setThreshold(animalThreshold[animal], upper);
       showStatus("Select center point of the neuron:"); 
@@ -206,20 +212,22 @@ macro "NeuronTracking v1.11 [t] Action Tool - Cg902T3f18N" {
         c = a && b;
       } while (c);                                          // then continue waiting for input
       
-    	//animalThreshold[animal] = lower;                    
-      animalRedFlag[animal] = 0;														
+      //animalThreshold[animal] = lower;                    
+      animalRedFlag[animal] = 0;                                                        
       animalTracking[animal] = useTracking;
       xpAll[animal] = xc; ypAll[animal] = yc;               // log to animal x, y arrays
-      if (b) print("x",xc,"y",yc,"a",animal,"t",lower,"f",0,"g",1);  // log the animal data, unless it's the end
+      if (b) {
+      	print("x",xc,"y",yc,"a",animal,"t",lower,"f",animalRedFlag[animal],"g",animalTracking[animal]);  // log the animal data, unless it's the end
       
-      makeRectangle(xc - sqsize/2, yc - sqsize/2, sqsize, sqsize);   // label the animal and number
-      run("Add Selection...", "stroke=green width=1 fill=0");
+      	makeRectangle(xc - sqsize/2, yc - sqsize/2, sqsize, sqsize);   // label the animal and number
+      	run("Add Selection...", "stroke=green width=1 fill=0");
       
-      makeRectangle(xc + sqsize/2, yc - sqsize/2, 24, 18);
-      run("Labels...", "color=white font=12 show use draw");
-      run("Properties... ", "name="+animal);
-      run("Add Selection...", "stroke=black width=0 fill=0");
-
+      	makeRectangle(xc + sqsize/2, yc - sqsize/2, 24, 18);
+      	run("Labels...", "color=white font=12 show use draw");
+      	run("Properties... ", "name="+animal);
+      	run("Add Selection...", "stroke=black width=0 fill=0");
+      }
+      
       slice = getSliceNumber();
       wait(1000);
     }                                                       // end loop per animal/neuron selected
@@ -236,6 +244,8 @@ macro "NeuronTracking v1.11 [t] Action Tool - Cg902T3f18N" {
   if (trackFolder==1) {                                     // if operating on several videos at once, 
 
     AnimalsToTrack = animal-1;                              // total number of animals to track (begins with 0)
+    print("AnimalsToTrack",AnimalsToTrack);
+    wait(2000);
     close();                                                // close video used to select neurons and begin loop with a clear workspace
 
     //**************** BIG LOOP through each movie file ***********************
@@ -405,7 +415,7 @@ function ReadAnimalInfo(PosFile,ID1,ID2) {
   lines = split(string, "\n");
   n_lines = lengthOf(lines);
   //AnimalInfo = newArray(n_lines);
-	AnimalInfo = newArray(MAX_ANIMALS);
+  AnimalInfo = newArray(MAX_ANIMALS);
 
   for (n=0; n<n_lines; n++) {
     if (ID2=="end") {
@@ -462,7 +472,7 @@ function SmallArenaTrackerBatch(TrackSetting) {
 
   // Clear the Log window and print header info
   print("\\Clear");
-  print("Slice,xc,yc,intdens,intsub,bgmedian,maxint,area,x,y,sqintdens,sqintsub,sqarea,threshold,animal,redFlag");
+  print("Slice,xc,yc,intdens,intsub,bgmedian,maxint,area,x,y,sqintdens,sqintsub,sqarea,threshold,animal,redFlag,useTracking");
 
   selectWindow(title);
   setThreshold(lower, 65535);                               // Set threshold for this animal
@@ -643,14 +653,20 @@ function SmallArenaTrackerBatch(TrackSetting) {
     //Y[slice-1] = yc;
     //Int1[slice-1] = intsub;
     Int2[slice-1] = sqintsub;
-    BgMed[slice-1] = bgmedian*sqarea;
+    if (slice == 1) {
+    	BgMed[slice-1] = 0;
+    	bgbase = bgmedian*sqarea;
+    } else {
+    	BgMed[slice-1] = bgmedian*sqarea - bgbase;
+    }
+
     //Avg[slice-1] = avg;
   
     //-----------------------------------------------------
     // Velocity prediction
     //   For moving animals, the next search region can be adjusted according to current velocity (or fraction thereof)
     
-    if (velocityPredict >= 0) {
+    if (velocityPredict != "0") {
       dx = xc-xp; dy = yc-yp;                               // get velocity (dx, dy) 
       xc = xc + dx/2; yc = yc+dy/2;                         // update current neuron position via velocity
     } 
@@ -677,9 +693,9 @@ function SmallArenaTrackerBatch(TrackSetting) {
   Plot.setColor("red");
   Plot.add("line", BgMed);
   Plot.setLegend("Intensity - BgMedian\tBgMedian", "top-right");
-  Plot.setLimitsToFit();
+  Plot.setLimits(0, NaN, 0, NaN);
   Plot.show();
-  setLocation(5, 400);
+  setLocation(5, 300);
 
   // Log the data to a text file
   selectWindow("Log");
